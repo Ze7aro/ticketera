@@ -1,0 +1,18 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    ports:
+      - "127.0.0.1:54329:5432"
+    environment:
+      POSTGRES_USER: ticketera
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Configurar POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ticketera
+    volumes:
+      - ticketera_postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ticketera -d ticketera"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+volumes:
+  ticketera_postgres:

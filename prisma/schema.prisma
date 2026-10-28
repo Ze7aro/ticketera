@@ -1,0 +1,280 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Role {
+  ADMIN
+  CONTROLLER
+}
+
+enum EventStatus {
+  DRAFT
+  PUBLISHED
+  SALES_PAUSED
+  FINISHED
+}
+
+enum OrderStatus {
+  PENDING
+  PAID
+  REJECTED
+  CANCELLED
+  EXPIRED
+  PAYMENT_REVIEW
+}
+
+enum PaymentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  REFUNDED
+}
+
+enum TicketStatus {
+  VALID
+  USED
+  CANCELLED
+}
+
+enum CheckInResult {
+  ACCEPTED
+  ALREADY_USED
+  INVALID
+  CANCELLED
+  WRONG_EVENT
+}
+
+model User {
+  id             String     @id @default(cuid())
+  email          String     @unique
+  name           String
+  passwordHash   String
+  role           Role       @default(CONTROLLER)
+  active         Boolean    @default(true)
+  sessionVersion Int        @default(0)
+  createdAt      DateTime   @default(now()) @db.Timestamptz(3)
+  updatedAt      DateTime   @updatedAt @db.Timestamptz(3)
+  checkIns       CheckIn[]
+  auditLogs      AuditLog[]
+}
+
+model Event {
+  id               String       @id @default(cuid())
+  slug             String       @unique
+  name             String
+  abbreviation     String
+  description      String       @default("")
+  venue            String
+  address          String
+  startsAt         DateTime     @db.Timestamptz(3)
+  timezone         String       @default("America/Argentina/Buenos_Aires")
+  conditions       String       @default("Entrada válida para un único ingreso. No compartir el código QR.")
+  status           EventStatus  @default(DRAFT)
+  nextTicketNumber Int          @default(1)
+  ticketNumberPrefix String?
+  createdAt        DateTime     @default(now()) @db.Timestamptz(3)
+  updatedAt        DateTime     @updatedAt @db.Timestamptz(3)
+  ticketTypes      TicketType[]
+  orders           Order[]
+  tickets          Ticket[]
+  checkIns         CheckIn[]
+
+  @@index([status, startsAt])
+}
+
+model TicketType {
+  id          String      @id @default(cuid())
+  eventId     String
+  event       Event       @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  name        String
+  priceCents  Int
+  stock       Int
+  sold        Int         @default(0)
+  reserved    Int         @default(0)
+  maxPerOrder Int         @default(6)
+  salesStart  DateTime    @db.Timestamptz(3)
+  salesEnd    DateTime    @db.Timestamptz(3)
+  active      Boolean     @default(true)
+  createdAt   DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime    @updatedAt @db.Timestamptz(3)
+  orderItems  OrderItem[]
+  tickets     Ticket[]
+
+  @@unique([eventId, name])
+}
+
+model Order {
+  id              String      @id @default(cuid())
+  eventId         String
+  event           Event       @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  status          OrderStatus @default(PENDING)
+  firstName       String
+  lastName        String
+  dni             String
+  email           String
+  phone           String
+  totalCents      Int
+  currency        String      @default("ARS")
+  accessTokenHash String      @unique
+  requestHash     String?
+  preferenceId    String?     @unique
+  paymentStartedAt DateTime? @db.Timestamptz(3)
+  reservationHeld Boolean @default(true)
+  paymentCheckoutUrl String?
+  lastReconciledAt DateTime? @db.Timestamptz(3)
+  expiresAt       DateTime    @db.Timestamptz(3)
+  paidAt          DateTime?   @db.Timestamptz(3)
+  ticketsIssuedAt DateTime? @db.Timestamptz(3)
+  createdAt       DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime    @updatedAt @db.Timestamptz(3)
+  items           OrderItem[]
+  payments        Payment[]
+  tickets         Ticket[]
+  notifications TicketEmail[]
+
+  @@index([eventId, status, createdAt])
+  @@index([email])
+  @@index([dni])
+  @@index([status, expiresAt])
+  @@index([eventId, status, expiresAt])
+}
+
+model OrderItem {
+  id             String     @id @default(cuid())
+  orderId        String
+  order          Order      @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  ticketTypeId   String
+  ticketType     TicketType @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)
+  quantity       Int
+  ticketTypeName String @default("")
+  unitPriceCents Int
+  tickets        Ticket[]
+
+  @@unique([orderId, ticketTypeId])
+}
+
+model Payment {
+  id          String        @id @default(cuid())
+  providerId  String        @unique
+  orderId     String
+  order       Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  status      PaymentStatus @default(PENDING)
+  amountCents Int
+  currency    String        @default("ARS")
+  applied     Boolean       @default(false)
+  providerStatus String     @default("pending")
+  providerUpdatedAt DateTime? @db.Timestamptz(3)
+  reviewReason String?
+  createdAt   DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt   DateTime      @updatedAt @db.Timestamptz(3)
+
+  @@index([orderId])
+}
+
+model Ticket {
+  id                 String       @id @default(cuid())
+  eventId            String
+  event              Event        @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  ticketTypeId       String
+  ticketType         TicketType   @relation(fields: [ticketTypeId], references: [id], onDelete: Restrict)
+  orderId            String?
+  order              Order?       @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  orderItemId        String?
+  orderItem          OrderItem?   @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+  itemOrdinal        Int?
+  sequence           Int
+  number             String       @unique
+  tokenHash          String       @unique
+  tokenEncrypted     String
+  attendeeName       String
+  status             TicketStatus @default(VALID)
+  usedAt             DateTime?    @db.Timestamptz(3)
+  cancelledAt        DateTime?    @db.Timestamptz(3)
+  cancellationReason String?
+  createdAt          DateTime     @default(now()) @db.Timestamptz(3)
+  checkIns           CheckIn[]
+
+  @@unique([eventId, sequence])
+  @@unique([orderItemId, itemOrdinal])
+  @@index([eventId, status])
+  @@index([orderId])
+  @@index([ticketTypeId])
+}
+
+model CheckIn {
+  id        String        @id @default(cuid())
+  eventId   String
+  event     Event         @relation(fields: [eventId], references: [id], onDelete: Restrict)
+  ticketId  String?
+  ticket    Ticket?       @relation(fields: [ticketId], references: [id], onDelete: Restrict)
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Restrict)
+  result    CheckInResult
+  device    String?
+  createdAt DateTime      @default(now()) @db.Timestamptz(3)
+
+  @@index([eventId, createdAt])
+  @@index([ticketId])
+  @@index([userId])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Restrict)
+  action     String
+  entityType String
+  entityId   String
+  reason     String?
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+
+  @@index([entityType, entityId])
+  @@index([userId, createdAt])
+}
+
+model RateLimit {
+  key       String   @id
+  count     Int      @default(1)
+  expiresAt DateTime @db.Timestamptz(3)
+  @@index([expiresAt])
+}
+
+model TicketSeries {
+  prefix String @id
+  nextNumber Int @default(1)
+}
+
+enum EmailStatus {
+  PENDING
+  SENDING
+  SENT
+  REVIEW
+  CANCELLED
+}
+
+model TicketEmail {
+  id String @id @default(cuid())
+  orderId String
+  order Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  requestKey String @unique
+  status EmailStatus @default(PENDING)
+  payloadEncrypted String?
+  attempts Int @default(0)
+  firstAttemptAt DateTime? @db.Timestamptz(3)
+  nextAttemptAt DateTime @default(now()) @db.Timestamptz(3)
+  leaseUntil DateTime? @db.Timestamptz(3)
+  leaseToken String?
+  sentAt DateTime? @db.Timestamptz(3)
+  providerId String?
+  lastErrorCode String?
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  @@index([status, nextAttemptAt])
+  @@index([orderId, createdAt])
+}
+
